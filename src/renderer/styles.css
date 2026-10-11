@@ -341,3 +341,10 @@ body.log-hidden #log { opacity: 0; transform: translateX(30px); pointer-events: 
 .chip { display: inline-flex; }
 .trend { display: inline-grid; place-items: center; }
 .fx-typing { display: flex; align-items: center; gap: 6px; }
+
+/* ---------------- Setup: key field ---------------- */
+.setup-row { display: flex; gap: 6px; }
+.setup-row input { flex: 1; min-width: 0; }
+.btn.ghost { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); border-color: var(--line); background: var(--glass-2); padding: 8px 10px; }
+.btn.ghost:hover { border-color: var(--accent); box-shadow: var(--glow); }
+.setup-error { min-height: 16px; margin-top: -4px; font: 12px var(--f-mono); color: var(--danger); text-align: center; }

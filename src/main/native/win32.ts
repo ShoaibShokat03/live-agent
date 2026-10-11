@@ -30,6 +30,8 @@ function bind() {
     GetWindowRect: user32.func('bool __stdcall GetWindowRect(intptr_t hwnd, _Out_ RECT *r)'),
     GetWindowThreadProcessId: user32.func('uint32_t __stdcall GetWindowThreadProcessId(intptr_t hwnd, _Out_ uint32_t *pid)'),
     GetForegroundWindow: user32.func('intptr_t __stdcall GetForegroundWindow()'),
+    WindowFromPoint: user32.func('intptr_t __stdcall WindowFromPoint(POINT p)'),
+    GetAncestor: user32.func('intptr_t __stdcall GetAncestor(intptr_t hwnd, uint32_t flags)'),
     SetForegroundWindow: user32.func('bool __stdcall SetForegroundWindow(intptr_t hwnd)'),
     ShowWindow: user32.func('bool __stdcall ShowWindow(intptr_t hwnd, int cmd)'),
     MoveWindow: user32.func('bool __stdcall MoveWindow(intptr_t hwnd, int x, int y, int w, int h, bool repaint)'),

@@ -1,7 +1,7 @@
 import type { AppConfig } from '../shared/types';
 import { $, h, hud } from './bridge';
 import { initHitTest } from './hud/hit';
-import { hydrateIcons } from './hud/icons';
+import { hydrateIcons, iconEl } from './hud/icons';
 import { Orb, type OrbState } from './hud/orb';
 import { rippleAt, subtitle, subtitleNewUserTurn, subtitleTurnEnd, toast, typingFx } from './hud/overlays';
 import { closeAllPanels, initPanels } from './hud/panels';
@@ -161,26 +161,54 @@ function sendTyped(text: string) {
 // ---------------- Setup (first run) ----------------
 function showSetup(): Promise<void> {
   return new Promise((resolve) => {
-    const input = h('input', { type: 'password', placeholder: 'Paste your Gemini API key', spellcheck: 'false' });
+    const input = h('input', { type: 'password', placeholder: 'Paste your Gemini API key', spellcheck: 'false', autocomplete: 'off' });
+    const paste = h('button', { class: 'btn ghost', title: 'Paste from clipboard' }, iconEl('copy', 14), ' PASTE');
+    const show = h('button', { class: 'btn ghost', title: 'Show / hide key' }, iconEl('eye', 14));
     const save = h('button', { class: 'btn approve' }, 'INITIALIZE');
+    const error = h('div', { class: 'setup-error' });
     const card = h(
       'div',
       { class: 'setup', 'data-hit': true },
       h('div', { class: 'setup-title' }, 'J.A.R.V.I.S'),
       h('p', {}, 'Gemini Live API key required. Get one free at aistudio.google.com/apikey — it is stored locally on this PC only.'),
-      input,
+      h('div', { class: 'setup-row' }, input, show, paste),
+      error,
       save,
     );
     $('#modal').append(card);
+
+    // Keys copied from web pages often carry spaces, newlines or quotes; strip them.
+    const clean = (s: string) => s.replace(/[\s"'`]/g, '');
     const go = async () => {
-      const key = input.value.trim();
-      if (key.length < 20) return input.classList.add('bad');
+      const key = clean(input.value);
+      input.value = key;
+      if (key.length < 30) {
+        input.classList.add('bad');
+        error.textContent = key ? 'That key looks too short. Copy the whole key from AI Studio.' : 'Paste your API key first.';
+        return;
+      }
       cfg = await hud.setConfig({ apiKey: key });
       card.remove();
       resolve();
     };
-    save.onclick = go;
-    input.onkeydown = (e) => e.key === 'Enter' && go();
+    save.addEventListener('click', go);
+    // Bug fix: never return a value from a key handler (returning false blocks typing and paste).
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') go();
+    });
+    input.addEventListener('input', () => {
+      input.classList.remove('bad');
+      error.textContent = '';
+    });
+    paste.addEventListener('click', async () => {
+      input.value = clean(await hud.readClipboard());
+      input.dispatchEvent(new Event('input'));
+      input.focus();
+    });
+    show.addEventListener('click', () => {
+      input.type = input.type === 'password' ? 'text' : 'password';
+      input.focus();
+    });
     setTimeout(() => input.focus(), 100);
   });
 }

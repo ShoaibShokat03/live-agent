@@ -78,7 +78,13 @@ export interface HudBridge {
   screenFrame(): Promise<ToolImage & { width: number; height: number }>;
   /** Stores AI-generated HTML in the main process and returns its sandboxed visual:// URL. */
   putVisual(id: string, html: string): Promise<string>;
-  setIgnoreMouse(ignore: boolean): void;
+  /** Window-local rects [x, y, w, h] of clickable HUD elements; everything else is click-through. */
+  setHitRects(rects: number[][]): void;
+  /** Force mouse capture (dragging, editing) regardless of rects. */
+  setHitLock(locked: boolean): void;
+  /** Make the overlay the real foreground window so it receives the keyboard. */
+  focus(): void;
+  readClipboard(): Promise<string>;
   hide(): void;
   quit(): void;
   onHotkey(cb: (a: HotkeyAction) => void): void;

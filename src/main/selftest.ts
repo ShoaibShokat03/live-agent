@@ -1,4 +1,5 @@
-import { app, type BrowserWindow } from 'electron';
+import { app, clipboard, screen, type BrowserWindow } from 'electron';
+import { chord, click, cursorPos, glide, setCursor, sleep } from './native/win32';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execute, manifest, type ToolContext } from './tools/registry';
@@ -35,6 +36,36 @@ export async function selfTest(win: BrowserWindow, ctx: ToolContext) {
     if (!pass) failed++;
     const summary = r.ok ? JSON.stringify(r.result).slice(0, 160) : r.error;
     console.log(`${pass ? 'PASS' : 'FAIL'}  ${name.padEnd(16)} ${String(r.ms).padStart(5)}ms  ${r.image ? `[image ${Math.round(r.image.data.length / 1024)}KB] ` : ''}${summary}`);
+  }
+
+  // Real keyboard input into the API-key field, exactly as a user does it: focus the field
+  // (the HUD then grabs the foreground), press OS-level Ctrl+V, then type a character.
+  const probe = `AIzaTest${Date.now()}`;
+  const savedClip = await clipboard.readText().catch(() => '');
+  await clipboard.writeText(probe);
+  const field = `(document.querySelector('.setup input') || document.querySelector('#cmd'))`;
+  const r: { x: number; y: number } = await win.webContents.executeJavaScript(
+    `(() => { document.body.classList.add('typing'); const i = ${field}; i.value = ''; const b = i.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`,
+  );
+  await sleep(300);
+  const home = cursorPos();
+  const wb = win.getBounds();
+  const p = screen.dipToScreenPoint({ x: wb.x + r.x, y: wb.y + r.y });
+  await glide(p.x, p.y, 150); // real OS mouse click on the field, like a user
+  await sleep(150);
+  await click('left');
+  await sleep(500);
+  await chord('ctrl+v');
+  await sleep(300);
+  await chord('x');
+  await sleep(300);
+  const got: string = await win.webContents.executeJavaScript(`${field}.value`);
+  await win.webContents.executeJavaScript(`${field}.blur(); 0`);
+  await clipboard.writeText(savedClip).catch(() => {});
+  setCursor(home.x, home.y);
+  for (const [label, ok] of [['ctrl+v paste', got.startsWith(probe)], ['typing', got === probe + 'x']] as const) {
+    if (!ok) failed++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${label.padEnd(22)} field got ${JSON.stringify(got)}`);
   }
 
   await win.webContents.executeJavaScript('window.__hudDemo && window.__hudDemo()');

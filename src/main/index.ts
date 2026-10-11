@@ -1,4 +1,5 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, protocol, screen, session, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeImage, protocol, screen, session, Tray } from 'electron';
+import { isWindows, w32 } from './native/win32';
 import path from 'node:path';
 import type { AppConfig, HotkeyAction } from '../shared/types';
 import { getConfig, hideFromCapture, setConfig } from './config';
@@ -53,7 +54,7 @@ function createWindow() {
     },
   });
   win.setAlwaysOnTop(true, 'screen-saver');
-  win.setIgnoreMouseEvents(true, { forward: true });
+  win.setIgnoreMouseEvents(true);
   if (hideFromCapture()) win.setContentProtection(true);
   win.loadFile(path.join(__dirname, '../renderer/index.html'));
   win.once('ready-to-show', () => {
@@ -63,9 +64,67 @@ function createWindow() {
     win?.setBounds(screen.getPrimaryDisplay().bounds);
   });
   win.on('closed', () => (win = null));
+  attachEditContextMenu(win);
 
   // Keep the overlay glued to the primary display if resolution / scaling changes.
   screen.on('display-metrics-changed', () => win?.setBounds(screen.getPrimaryDisplay().bounds));
+}
+
+// ---------- Click-through ----------
+// The renderer publishes where its clickable widgets are; we poll the real cursor at 60 Hz and
+// stop being click-through only over them. Works no matter which app has focus.
+const hit = { rects: [] as number[][], locked: false, capturing: false };
+
+function setCapture(on: boolean) {
+  if (!win || on === hit.capturing) return;
+  hit.capturing = on;
+  win.setIgnoreMouseEvents(!on);
+}
+
+function startHitPolling() {
+  setInterval(() => {
+    if (!win || !win.isVisible()) return setCapture(false);
+    const c = screen.getCursorScreenPoint();
+    const b = win.getBounds();
+    const x = c.x - b.x, y = c.y - b.y;
+    setCapture(hit.locked || hit.rects.some(([rx, ry, rw, rh]) => x >= rx && x < rx + rw && y >= ry && y < ry + rh));
+  }, 16);
+}
+
+/**
+ * Bring the overlay to the real foreground so typing and pasting reach it. Called right after
+ * the user clicks a text field, so Windows allows the switch without any foreground-lock tricks
+ * (an Alt tap here would toggle menu-key mode and corrupt the next keystroke).
+ */
+function focusOverlay() {
+  if (!win) return;
+  setCapture(true);
+  if (isWindows) {
+    try {
+      const hwnd = Number(win.getNativeWindowHandle().readBigUInt64LE(0));
+      if (Number(w32().GetForegroundWindow()) !== hwnd) w32().SetForegroundWindow(hwnd);
+    } catch {}
+  }
+  if (!win.isFocused()) win.focus();
+  win.webContents.focus();
+}
+
+/** Cut/Copy/Paste/Select-all on right-click in any text field. */
+function attachEditContextMenu(w: BrowserWindow) {
+  w.webContents.on('context-menu', (_e, p) => {
+    if (!p.isEditable && !p.selectionText) return;
+    Menu.buildFromTemplate(
+      p.isEditable
+        ? [
+            { role: 'cut', enabled: p.editFlags.canCut },
+            { role: 'copy', enabled: p.editFlags.canCopy },
+            { role: 'paste', enabled: p.editFlags.canPaste },
+            { type: 'separator' },
+            { role: 'selectAll' },
+          ]
+        : [{ role: 'copy' }],
+    ).popup({ window: w });
+  });
 }
 
 function toggleHud() {
@@ -141,7 +200,10 @@ function registerIpc() {
     visuals.set(id, html);
     return `visual://panel/${encodeURIComponent(id)}?v=${Date.now()}`;
   });
-  ipcMain.on('win:ignore', (_e, ignore: boolean) => win?.setIgnoreMouseEvents(ignore, { forward: true }));
+  ipcMain.on('hit:rects', (_e, rects: number[][]) => (hit.rects = rects));
+  ipcMain.on('hit:lock', (_e, locked: boolean) => (hit.locked = locked));
+  ipcMain.on('win:focus', () => focusOverlay());
+  ipcMain.handle('clipboard:read', () => clipboard.readText());
   ipcMain.on('win:hide', () => win?.hide());
   ipcMain.on('app:quit', () => app.quit());
 }
@@ -166,8 +228,12 @@ app.whenReady().then(() => {
   hotkeys.hud = bindFirst(['Control+Alt+J', 'Alt+Shift+H'], toggleHud);
   hotkeys.vision = bindFirst(['Control+Alt+V', 'Alt+Shift+V'], () => hotkey('toggle-vision'));
 
+  // Hidden menu (frameless window) that guarantees the standard edit shortcuts in every input.
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }]));
+
   registerIpc();
   createWindow();
+  startHitPolling();
   createTray();
   warmAppIndex();
 
