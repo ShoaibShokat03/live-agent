@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; connect-src 'self' wss://generativelanguage.googleapis.com https://generativelanguage.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob: data:; frame-src visual:; worker-src 'self' blob:"
+    />
+    <title>JARVIS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@500;600&family=JetBrains+Mono:wght@400;600&display=swap"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="grid-fx"></div>
+
+    <!-- Top status bar -->
+    <header id="topbar" data-hit>
+      <div class="brand"><span class="brand-mark"></span>J.A.R.V.I.S</div>
+      <div class="tb-item"><label>STATUS</label><b id="status" data-state="offline">OFFLINE</b></div>
+      <div class="tb-item"><label>CORE</label><b id="model">—</b></div>
+      <div class="tb-item"><label>RESPONSE</label><b id="latency">—</b></div>
+      <div class="tb-item"><label>TIME</label><b id="clock">--:--:--</b></div>
+      <div class="tb-actions">
+        <button id="btn-mini" class="icon-btn" title="Minimize HUD"><i data-icon="minimize"></i></button>
+        <button id="btn-hide" class="icon-btn"><i data-icon="eye-off"></i></button>
+        <button id="btn-power" class="icon-btn danger" title="Shut down"><i data-icon="power"></i></button>
+      </div>
+    </header>
+
+    <div id="panels"></div>
+    <div id="fx"></div>
+
+    <!-- Activity log -->
+    <aside id="log" data-hit>
+      <div class="log-head"><span class="pulse"></span>SYSTEM LOG</div>
+      <div id="log-list"></div>
+    </aside>
+
+    <div id="toasts"></div>
+
+    <!-- Core / dock -->
+    <section id="core">
+      <div id="subs"></div>
+      <canvas id="orb" data-hit></canvas>
+      <nav id="dock" data-hit>
+        <button id="btn-mic" class="dock-btn"><i data-icon="mic" data-size="18"></i>VOICE</button>
+        <button id="btn-vision" class="dock-btn"><i data-icon="eye" data-size="18"></i>VISION</button>
+        <button id="btn-type" class="dock-btn" title="Type a command"><i data-icon="keyboard" data-size="18"></i>TYPE</button>
+        <button id="btn-log" class="dock-btn" title="Toggle log"><i data-icon="activity" data-size="18"></i>LOG</button>
+        <button id="btn-clear" class="dock-btn" title="Close all panels"><i data-icon="trash" data-size="18"></i>CLEAR</button>
+      </nav>
+      <div id="cmdbar" data-hit><i data-icon="chevron" data-size="18"></i><input id="cmd" placeholder="Type a command for JARVIS…  (Enter to send, Esc to close)" spellcheck="false" /></div>
+    </section>
+
+    <div id="modal"></div>
+    <script src="main.js"></script>
+  </body>
+</html>

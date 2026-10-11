@@ -1,0 +1,24 @@
+{
+  "name": "jarvis-live",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sci-fi voice AI desktop agent powered by Gemini Live",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit -p .",
+    "start": "node build.mjs && electron .",
+    "dev": "node build.mjs --watch",
+    "selftest": "node build.mjs && node scripts/selftest.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "^2.28.0",
+    "koffi": "^3.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^44.7.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.9.0"
+  }
+}
