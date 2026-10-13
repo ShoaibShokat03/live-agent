@@ -6,6 +6,11 @@ export interface ToolContext {
   win: () => BrowserWindow | null;
   /** Push an event to the HUD renderer. */
   emit: (channel: string, payload: unknown) => void;
+  /**
+   * Run an agent mouse action with the HUD fully click-through, so a JARVIS panel that
+   * happens to cover the target can never swallow the AI's click.
+   */
+  passthrough: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 export interface ToolDef<A = any> {

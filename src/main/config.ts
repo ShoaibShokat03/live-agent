@@ -35,4 +35,3 @@ export function setConfig(patch: Partial<AppConfig>): AppConfig {
   return cache;
 }
 
-export const hideFromCapture = () => process.env.HIDE_FROM_CAPTURE !== 'false';

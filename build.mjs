@@ -15,7 +15,7 @@ const copyStatic = {
 };
 
 const builds = [
-  { ...common, entryPoints: ['src/main/index.ts'], outfile: 'dist/main/index.js', platform: 'node', format: 'cjs', external: ['electron', 'koffi'] },
+  { ...common, entryPoints: ['src/main/index.ts'], outfile: 'dist/main/index.js', platform: 'node', format: 'cjs', external: ['electron', 'koffi', '@huggingface/transformers', 'onnxruntime-node', 'sharp'] },
   { ...common, entryPoints: ['src/preload/index.ts'], outfile: 'dist/preload/index.js', platform: 'node', format: 'cjs', external: ['electron'] },
   { ...common, entryPoints: ['src/renderer/main.ts'], outfile: 'dist/renderer/main.js', platform: 'browser', format: 'iife', plugins: [copyStatic] },
 ];

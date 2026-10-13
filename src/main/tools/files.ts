@@ -21,7 +21,20 @@ export function resolvePath(p: string): string {
   if (s === '~' || s.startsWith('~/') || s.startsWith('~\\')) s = path.join(os.homedir(), s.slice(1));
   const first = s.split(/[\\/]/)[0].toLowerCase();
   if (KNOWN[first]) s = path.join(KNOWN[first](), s.slice(first.length));
-  return path.resolve(s);
+  return assertAllowed(path.resolve(s));
+}
+
+/**
+ * JARVIS's own data (API key, face/voice database, config) and .env files are off-limits to the
+ * AI's file tools — so a malicious web page can't trick the AI into reading and leaking them.
+ */
+function assertAllowed(p: string) {
+  const lower = p.toLowerCase();
+  const blocked = [app.getPath('userData'), path.join(app.getAppPath(), '.cache')].map((d) => d.toLowerCase());
+  if (blocked.some((d) => lower === d || lower.startsWith(d + path.sep)) || /(^|[\\/])\.env(\.|$)/i.test(path.basename(p))) {
+    throw new Error("Access denied: that is JARVIS's private data (keys, biometrics, config).");
+  }
+  return p;
 }
 
 const fmtSize = (n: number) =>

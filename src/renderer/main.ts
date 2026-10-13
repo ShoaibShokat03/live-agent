@@ -3,10 +3,12 @@ import { $, h, hud } from './bridge';
 import { initHitTest } from './hud/hit';
 import { hydrateIcons, iconEl } from './hud/icons';
 import { Orb, type OrbState } from './hud/orb';
-import { rippleAt, subtitle, subtitleNewUserTurn, subtitleTurnEnd, toast, typingFx } from './hud/overlays';
+import { markRegion, rippleAt, scanFx, subtitle, subtitleNewUserTurn, subtitleTurnEnd, toast, typingFx } from './hud/overlays';
 import { closeAllPanels, initPanels } from './hud/panels';
 import { accentColor } from './hud/theme';
 import { Mic, Player } from './live/audio';
+import { Perception } from './live/perception';
+import { perceptionTools } from './tools/perception-tools';
 import { systemPrompt } from './live/prompt';
 import { LiveClient, type LiveState } from './live/session';
 import { Dispatcher } from './tools/dispatcher';
@@ -26,7 +28,22 @@ let userSpokeAt = 0;
 let awaitingFirstAudio = false;
 
 const player = new Player();
-const mic = new Mic((b64) => client?.sendAudio(b64));
+const perception = new Perception({
+  sendFrame: (b64) => client?.sendImage(b64),
+  onRecognized: (name) => {
+    toast('Identity confirmed', name, 'success', 4);
+    client?.sendText(`[SYSTEM EVENT] The camera just recognized ${name}. Greet them briefly by name if it fits the moment; otherwise stay silent.`);
+  },
+  onSpeaker: (m) => {
+    $('#speaker').textContent = m.name ? m.name.toUpperCase() : 'UNKNOWN';
+    $('#speaker').title = m.candidates.map((c) => `${c.name} ${c.score}`).join(', ');
+  },
+  onCameraChange: (on) => setFlag('btn-camera', on),
+});
+const mic = new Mic((b64, pcm, rms) => {
+  client?.sendAudio(b64);
+  perception.speech.push(pcm, rms, player.speaking);
+});
 
 // ---------------- HUD state ----------------
 function setFlag(id: string, on: boolean) {
@@ -38,7 +55,24 @@ const controls: HudControls = {
   setLog: (on) => document.body.classList.toggle('log-hidden', !on),
   setTheme: (c) => document.documentElement.style.setProperty('--accent', accentColor(c)!),
   setVision: (on) => setVision(on),
+  hide: () => hud.hide(),
+  shutdown: () => shutdownAfterSpeech(),
 };
+
+/** Quit once JARVIS has finished saying goodbye (max 8 s), so the reply isn't cut off. */
+function shutdownAfterSpeech() {
+  toast('Shutting down', 'Goodbye.', 'warning', 8);
+  const t0 = Date.now();
+  let quietSince = 0;
+  const tick = setInterval(() => {
+    const now = Date.now();
+    quietSince = player.speaking ? 0 : quietSince || now;
+    if ((now - t0 > 1500 && quietSince && now - quietSince > 700) || now - t0 > 8000) {
+      clearInterval(tick);
+      hud.quit();
+    }
+  }, 100);
+}
 
 function orbState(): OrbState {
   if (liveState === 'error') return 'error';
@@ -99,7 +133,7 @@ async function setVision(on: boolean) {
 // ---------------- Session ----------------
 async function startSession() {
   const mainTools = await hud.toolManifest();
-  const dispatcher = new Dispatcher(mainTools, uiTools(controls), {
+  const dispatcher = new Dispatcher(mainTools, [...uiTools(controls), ...perceptionTools(perception)], {
     autoApprove: () => cfg.autoApprove,
     sendImage: (b64, mime) => client?.sendImage(b64, mime),
     onBusy: (b) => (busy = b),
@@ -216,17 +250,27 @@ function showSetup(): Promise<void> {
 // ---------------- Wiring ----------------
 function wireUi() {
   $('#btn-mic').onclick = () => setMic(!mic.active);
-  $('#orb').onclick = () => setMic(!mic.active);
+  $('#orb').onclick = () => (document.body.classList.contains('mini') ? controls.setMini(false) : setMic(!mic.active));
+  $('#btn-expand').onclick = () => controls.setMini(false);
   $('#btn-vision').onclick = () => setVision(!visionTimer);
+  $('#btn-camera').onclick = () =>
+    perception.cameraOn ? perception.stopCamera() : perception.startCamera(true).catch((e) => toast('Camera unavailable', String(e?.message ?? e), 'error'));
   $('#btn-type').onclick = () => {
     document.body.classList.toggle('typing');
     if (document.body.classList.contains('typing')) $<HTMLInputElement>('#cmd').focus();
   };
   $('#btn-clear').onclick = () => closeAllPanels();
   $('#btn-log').onclick = () => document.body.classList.toggle('log-hidden');
-  $('#btn-mini').onclick = () => document.body.classList.toggle('mini');
+  $('#btn-mini').onclick = () => controls.setMini(true);
   $('#btn-hide').onclick = () => hud.hide();
   $('#btn-power').onclick = () => hud.quit();
+  // The whole command bar is a click target for its input.
+  $('#cmdbar').addEventListener('mousedown', (e) => {
+    if (e.target !== $('#cmd')) {
+      e.preventDefault();
+      $<HTMLInputElement>('#cmd').focus();
+    }
+  });
   $<HTMLInputElement>('#cmd').onkeydown = (e) => {
     const el = e.target as HTMLInputElement;
     if (e.key === 'Enter') {
@@ -241,12 +285,19 @@ function wireUi() {
   hud.onHotkey((a) => {
     if (a === 'toggle-mic') setMic(!mic.active);
     if (a === 'toggle-vision') setVision(!visionTimer);
+    if (a === 'toggle-hud') controls.setMini(false);
   });
   hud.onFx((e) => {
     if (e.type === 'click' || e.type === 'move') rippleAt(e.x, e.y, e.type);
+    if (e.type === 'scan') scanFx(e.boxes);
+    if (e.type === 'target') markRegion(e.box, e.label, 3);
     if (e.type === 'type') typingFx(e.text);
   });
   hud.onEvent((e) => {
+    if (e.type === 'voice-model') {
+      $('#speaker').textContent = e.pct >= 100 ? '—' : `MODEL ${e.pct}%`;
+      return;
+    }
     if (e.type === 'timer') {
       toast(e.label, 'Timer complete', 'warning', 15);
       client?.sendText(`[SYSTEM EVENT] The timer "${e.label}" just finished. Tell the user now, briefly.`);
@@ -296,6 +347,23 @@ async function hudDemo() {
   subtitle('ai', 'All systems are nominal, sir. Telemetry is on your display.', false);
 }
 (window as any).__hudDemo = hudDemo;
+
+/** Self-test hook: load the face models and run detection on a blank image (expects 0 faces). */
+(window as any).__faceTest = async () => {
+  try {
+    const { detectFaces, loadFaceModels } = await import('./live/faces');
+    await loadFaceModels();
+    const c = document.createElement('canvas');
+    c.width = 320;
+    c.height = 240;
+    const faces = await detectFaces(c);
+    const fa: any = await import('@vladmandic/face-api');
+    return { faces: faces.length, backend: fa.tf.getBackend() };
+  } catch (e: any) {
+    return { error: String(e?.message ?? e) };
+  }
+};
+
 
 async function boot() {
   hydrateIcons();

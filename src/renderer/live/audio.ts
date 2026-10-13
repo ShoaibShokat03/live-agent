@@ -47,7 +47,8 @@ export class Mic {
   private ctx?: AudioContext;
   private stream?: MediaStream;
   private node?: AudioWorkletNode;
-  constructor(private onChunk: (b64: string) => void) {}
+  /** onChunk receives each 32 ms chunk as base64 (for Gemini) and raw PCM + RMS (for voiceprints). */
+  constructor(private onChunk: (b64: string, pcm: Int16Array, rms: number) => void) {}
 
   get active() {
     return !!this.stream;
@@ -65,7 +66,7 @@ export class Mic {
     this.node = new AudioWorkletNode(this.ctx, 'pcm16');
     this.node.port.onmessage = (e) => {
       this.level = this.level * 0.6 + e.data.rms * 0.4;
-      this.onChunk(bufToB64(e.data.pcm));
+      this.onChunk(bufToB64(e.data.pcm), new Int16Array(e.data.pcm), e.data.rms);
     };
     const mute = this.ctx.createGain();
     mute.gain.value = 0;

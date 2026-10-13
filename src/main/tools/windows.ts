@@ -59,9 +59,9 @@ function startDetached(cmd: string, args: string[]) {
 
 // ---------- Window matching ----------
 /** User app windows, excluding the JARVIS overlay itself. */
-const appWindows = () => listWindows().filter((w) => w.pid !== process.pid);
+export const appWindows = () => listWindows().filter((w) => w.pid !== process.pid);
 
-function findWindows(target: string): WinInfo[] {
+export function findWindows(target: string): WinInfo[] {
   const all = appWindows();
   const ranked = all
     .map((w) => ({ w, s: Math.max(score(target, w.title), score(target, w.process.replace(/\.exe$/i, ''))) }))
@@ -199,3 +199,19 @@ export const windowTools: ToolDef[] = [
     },
   },
 ];
+
+/**
+ * If JARVIS's own HUD holds the keyboard (e.g. the user just typed in it), hand the foreground
+ * back to the topmost app window so the AI's typing and shortcuts land where the user expects.
+ */
+export async function ensureAppForeground() {
+  if (!isWindows) return;
+  const pid = [0];
+  w32().GetWindowThreadProcessId(Number(w32().GetForegroundWindow()), pid);
+  if (pid[0] !== process.pid) return;
+  const top = appWindows().find((w) => !w.minimized);
+  if (top) {
+    focusWindow(top.hwnd);
+    await sleep(80);
+  }
+}

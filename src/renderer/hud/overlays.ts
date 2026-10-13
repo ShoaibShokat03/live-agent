@@ -95,6 +95,18 @@ export function pointAt(x: number, y: number, label = '', seconds = 5) {
   }, seconds * 1000);
 }
 
+/** Brief "scanning" sweep over every element the AI just read with UI Automation. */
+export function scanFx(boxes: { x: number; y: number; width: number; height: number }[]) {
+  const layer = h('div', { class: 'fx-scan' });
+  for (const b of boxes) {
+    const el = h('i');
+    Object.assign(el.style, { left: `${nx(b.x)}px`, top: `${ny(b.y)}px`, width: `${nw(b.width)}px`, height: `${nh(b.height)}px` });
+    layer.append(el);
+  }
+  $('#fx').append(layer);
+  setTimeout(() => layer.remove(), 1600);
+}
+
 export function typingFx(text: string) {
   const el = h('div', { class: 'fx-typing' }, iconEl('keyboard', 14), ` ${text.length > 60 ? text.slice(0, 60) + '…' : text}`);
   $('#fx').append(el);

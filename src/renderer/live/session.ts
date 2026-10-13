@@ -34,6 +34,15 @@ export interface LiveOptions {
 /** Close codes that mean "your request is wrong" — retrying won't help. */
 const FATAL_CODES = new Set([1007, 1008]);
 
+/** Account/config problems: retrying can't fix these, so stop and tell the user what to do. */
+export function explainFatal(text: string): string | null {
+  if (/credit|prepay|billing/i.test(text)) return 'Your Gemini API credits are used up. Top up in AI Studio (aistudio.google.com → Billing), then restart JARVIS.';
+  if (/quota|RESOURCE_EXHAUSTED|rate limit/i.test(text)) return 'Gemini quota exceeded. Wait a minute or raise your limits in AI Studio.';
+  if (/API key not valid|API_KEY_INVALID|PERMISSION_DENIED|unauthori[sz]ed|invalid authentication/i.test(text)) return 'The Gemini API key was rejected. Paste a valid key (AI Studio → Get API key).';
+  if (/not found for API version|is not supported for|models\/.+ is not found/i.test(text)) return 'The configured Gemini model is not available to this key. Change GEMINI_MODEL in .env.';
+  return null;
+}
+
 /**
  * Gemini Live session with automatic, seamless reconnection:
  * session-resumption handles + context-window compression keep one logical
@@ -88,8 +97,10 @@ export class LiveClient {
         },
       });
     } catch (e: any) {
-      this.cb.onState('error', e?.message ?? String(e));
-      this.scheduleReconnect();
+      const msg = e?.message ?? String(e);
+      const fatal = explainFatal(msg);
+      this.cb.onState('error', fatal ?? msg);
+      if (!fatal) this.scheduleReconnect();
     }
   }
 
@@ -124,9 +135,10 @@ export class LiveClient {
     this.ready = false;
     this.session = undefined;
     if (this.closing) return this.cb.onState('closed');
-    if (FATAL_CODES.has(e.code)) {
+    const fatal = explainFatal(e.reason ?? '');
+    if (FATAL_CODES.has(e.code) || fatal) {
       this.resumeHandle = undefined;
-      return this.cb.onState('error', e.reason || `Session rejected (code ${e.code})`);
+      return this.cb.onState('error', fatal ?? (e.reason || `Session rejected (code ${e.code})`));
     }
     this.scheduleReconnect(e.reason);
   }

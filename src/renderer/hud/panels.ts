@@ -6,7 +6,7 @@ import { markdown } from './markdown';
 import { accentColor } from './theme';
 import { mountMonitor } from './monitor';
 
-export type PanelKind = 'text' | 'markdown' | 'code' | 'list' | 'table' | 'image' | 'chart' | 'stats' | 'visual' | 'monitor';
+export type PanelKind = 'text' | 'markdown' | 'code' | 'list' | 'table' | 'image' | 'chart' | 'stats' | 'visual' | 'monitor' | 'custom';
 
 export interface StatItem {
   label: string;
@@ -28,6 +28,10 @@ export interface PanelSpec {
   chart?: ChartData;
   stats?: StatItem[];
   html?: string;
+  /** kind='custom': builds the body; returns a cleanup function. */
+  mount?: (body: HTMLElement) => () => void;
+  /** Called when the user closes the panel. */
+  onClose?: () => void;
   /** Normalized 0-1000 box; omitted → auto-placed. */
   x?: number;
   y?: number;
@@ -176,6 +180,10 @@ function renderBody(p: Panel) {
       b.innerHTML = '';
       p.cleanup.push(mountMonitor(b));
       break;
+    case 'custom':
+      b.innerHTML = '';
+      if (s.mount) p.cleanup.push(s.mount(b));
+      break;
   }
 }
 
@@ -241,7 +249,10 @@ export function openPanel(spec: PanelSpec): string {
 
   // interactions
   el.addEventListener('pointerdown', () => (el.style.zIndex = String(++zTop)));
-  closeBtn.onclick = () => closePanel(spec.id);
+  closeBtn.onclick = () => {
+    p.spec.onClose?.();
+    closePanel(spec.id);
+  };
   minBtn.onclick = () => el.classList.toggle('collapsed');
   drag(head, (dx, dy, start) => {
     el.style.left = `${start.left + dx}px`;

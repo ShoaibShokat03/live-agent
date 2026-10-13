@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; connect-src 'self' wss://generativelanguage.googleapis.com https://generativelanguage.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob: data:; frame-src visual:; worker-src 'self' blob:"
+      content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; connect-src 'self' models: wss://generativelanguage.googleapis.com https://generativelanguage.googleapis.com; img-src 'self' data: blob: https:; media-src 'self' blob: data:; frame-src visual:; worker-src 'self' blob:"
     />
     <title>JARVIS</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -23,6 +23,7 @@
       <div class="tb-item"><label>STATUS</label><b id="status" data-state="offline">OFFLINE</b></div>
       <div class="tb-item"><label>CORE</label><b id="model">—</b></div>
       <div class="tb-item"><label>RESPONSE</label><b id="latency">—</b></div>
+      <div class="tb-item"><label>SPEAKER</label><b id="speaker">—</b></div>
       <div class="tb-item"><label>TIME</label><b id="clock">--:--:--</b></div>
       <div class="tb-actions">
         <button id="btn-mini" class="icon-btn" title="Minimize HUD"><i data-icon="minimize"></i></button>
@@ -46,9 +47,11 @@
     <section id="core">
       <div id="subs"></div>
       <canvas id="orb" data-hit></canvas>
+      <button id="btn-expand" class="dock-btn" data-hit title="Restore the full HUD"><i data-icon="maximize" data-size="16"></i>EXPAND</button>
       <nav id="dock" data-hit>
         <button id="btn-mic" class="dock-btn"><i data-icon="mic" data-size="18"></i>VOICE</button>
         <button id="btn-vision" class="dock-btn"><i data-icon="eye" data-size="18"></i>VISION</button>
+        <button id="btn-camera" class="dock-btn" title="Webcam: see you and recognize faces"><i data-icon="camera" data-size="18"></i>CAMERA</button>
         <button id="btn-type" class="dock-btn" title="Type a command"><i data-icon="keyboard" data-size="18"></i>TYPE</button>
         <button id="btn-log" class="dock-btn" title="Toggle log"><i data-icon="activity" data-size="18"></i>LOG</button>
         <button id="btn-clear" class="dock-btn" title="Close all panels"><i data-icon="trash" data-size="18"></i>CLEAR</button>

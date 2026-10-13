@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, nativeIma
 import { isWindows, w32 } from './native/win32';
 import path from 'node:path';
 import type { AppConfig, HotkeyAction } from '../shared/types';
-import { getConfig, hideFromCapture, setConfig } from './config';
+import { getConfig, setConfig } from './config';
 import { sampleStats } from './stats';
 import { fileTools } from './tools/files';
 import { inputTools } from './tools/input';
@@ -10,19 +10,33 @@ import { memoryTools } from './tools/memory';
 import { execute, manifest, register, type ToolContext } from './tools/registry';
 import { captureFrame, screenTools } from './tools/screen';
 import { systemTools } from './tools/system';
+import { uiTools } from './tools/ui';
+import { uia } from './native/uia';
+import { setCaptureGuard } from './vision';
+import fs from 'node:fs';
+import { addFaces, addVoice, faceDb, forgetPerson, listPeople, matchVoice } from './people';
+import { embedVoice, loadVoiceModel, setVoiceCacheDir } from './voiceprint';
 import { warmAppIndex, windowTools } from './tools/windows';
 import { webTools } from './tools/web';
 
 // Sandboxed origin for AI-generated interactive visuals (HTML/JS panels). Isolated from the HUD.
-protocol.registerSchemesAsPrivileged([{ scheme: 'visual', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'visual', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // Local ML model files for the HUD (face recognition), served read-only from node_modules.
+  { scheme: 'models', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
+]);
 const visuals = new Map<string, string>();
 
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+// A transparent always-on-top overlay must never be treated as "covered": Chromium's occlusion
+// tracking would pause its rendering and animations (frozen HUD, stuck fade-ins, unclickable bar).
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
-register([...inputTools, ...windowTools, ...screenTools, ...systemTools, ...fileTools, ...webTools, ...memoryTools]);
+register([...uiTools, ...inputTools, ...windowTools, ...screenTools, ...systemTools, ...fileTools, ...webTools, ...memoryTools]);
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -30,6 +44,16 @@ let tray: Tray | null = null;
 const ctx: ToolContext = {
   win: () => win,
   emit: (channel, payload) => win?.webContents.send(channel, payload),
+  async passthrough(fn) {
+    hit.agent++;
+    setCapture(false);
+    try {
+      return await fn();
+    } finally {
+      // Small tail so the OS finishes delivering the click before the HUD can capture again.
+      setTimeout(() => hit.agent--, 150);
+    }
+  },
 };
 
 function createWindow() {
@@ -55,15 +79,26 @@ function createWindow() {
   });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setIgnoreMouseEvents(true);
-  if (hideFromCapture()) win.setContentProtection(true);
   win.loadFile(path.join(__dirname, '../renderer/index.html'));
   win.once('ready-to-show', () => {
-    win?.showInactive();
+    showOverlay();
     // Windows clamps new windows to the work area; re-apply so the overlay also covers the taskbar
     // and the HUD's 0-1000 grid matches the screen grid exactly.
     win?.setBounds(screen.getPrimaryDisplay().bounds);
   });
   win.on('closed', () => (win = null));
+  win.on('minimize', () => {
+    // Restoring inside the minimize event races Chromium's compositor and freezes the HUD
+    // (animations stuck, nothing repaints). Restore on the next tick, then force a repaint.
+    setTimeout(() => {
+      if (!win) return;
+      win.restore();
+      showOverlay();
+      win.webContents.invalidate();
+    }, 60);
+  });
+  // Other always-on-top apps can push in front of the HUD; quietly reclaim the top spot.
+  setInterval(() => win?.isVisible() && !win.isMinimized() && keepOnTop(), 5000);
   attachEditContextMenu(win);
 
   // Keep the overlay glued to the primary display if resolution / scaling changes.
@@ -73,17 +108,23 @@ function createWindow() {
 // ---------- Click-through ----------
 // The renderer publishes where its clickable widgets are; we poll the real cursor at 60 Hz and
 // stop being click-through only over them. Works no matter which app has focus.
-const hit = { rects: [] as number[][], locked: false, capturing: false };
+const hit = { rects: [] as number[][], locked: false, capturing: false, agent: 0 };
 
+/**
+ * Source of truth is the window's real WS_EX_TRANSPARENT flag, not a cached value: Windows/Electron
+ * can silently reset it (e.g. after a minimize → restore), which used to leave the HUD unclickable.
+ */
 function setCapture(on: boolean) {
-  if (!win || on === hit.capturing) return;
+  if (!win) return;
+  const ignoring = isWindows ? !!(w32().GetWindowLongW(Number(win.getNativeWindowHandle().readBigUInt64LE(0)), -20) & 0x20) : !hit.capturing;
   hit.capturing = on;
+  if (ignoring === !on) return;
   win.setIgnoreMouseEvents(!on);
 }
 
 function startHitPolling() {
   setInterval(() => {
-    if (!win || !win.isVisible()) return setCapture(false);
+    if (!win || !win.isVisible() || hit.agent > 0) return setCapture(false);
     const c = screen.getCursorScreenPoint();
     const b = win.getBounds();
     const x = c.x - b.x, y = c.y - b.y;
@@ -127,9 +168,47 @@ function attachEditContextMenu(w: BrowserWindow) {
   });
 }
 
+/**
+ * Every screenshot for the AI must show the real desktop, not JARVIS. Windows can't exclude
+ * Electron's transparent overlay from capture, and Chromium can leave stale pixels when the page
+ * hides itself, so the window is moved off-screen at the OS level for the capture (~60 ms blink).
+ */
+function installCaptureGuard() {
+  let depth = 0;
+  const SWP = 0x0001 | 0x0004 | 0x0010; // NOSIZE | NOZORDER | NOACTIVATE
+  setCaptureGuard(async (fn) => {
+    if (!win || !win.isVisible() || !isWindows || depth > 0) return fn();
+    depth++;
+    const hwnd = Number(win.getNativeWindowHandle().readBigUInt64LE(0));
+    const r: any = {};
+    w32().GetWindowRect(hwnd, r);
+    try {
+      w32().SetWindowPos(hwnd, 0, -32000, -32000, 0, 0, SWP);
+      await new Promise((res) => setTimeout(res, Number(process.env.JARVIS_CAPTURE_DELAY ?? 40))); // next DWM frame
+      return await fn();
+    } finally {
+      w32().SetWindowPos(hwnd, 0, r.left, r.top, 0, 0, SWP);
+      depth--;
+    }
+  });
+}
+
+/** Restoring/showing a window drops it out of the topmost band on Windows — always re-assert. */
+function keepOnTop() {
+  win?.setAlwaysOnTop(true, 'screen-saver');
+  win?.moveTop();
+}
+
+function showOverlay() {
+  win?.showInactive();
+  keepOnTop();
+}
+
 function toggleHud() {
   if (!win) return;
-  win.isVisible() ? win.hide() : win.showInactive();
+  if (win.isVisible()) return win.hide();
+  showOverlay();
+  win.webContents.send('hotkey', 'toggle-hud'); // renderer restores the full HUD (leaves mini mode)
 }
 
 /**
@@ -184,7 +263,7 @@ function bindFirst(combos: string[], fn: () => void): string {
 }
 
 const hotkey = (a: HotkeyAction) => {
-  if (a !== 'toggle-hud' && win && !win.isVisible()) win.showInactive();
+  if (a !== 'toggle-hud' && win && !win.isVisible()) showOverlay();
   win?.webContents.send('hotkey', a);
 };
 
@@ -192,6 +271,22 @@ function registerIpc() {
   ipcMain.handle('config:get', () => getConfig());
   ipcMain.handle('config:set', (_e, patch: Partial<AppConfig>) => setConfig(patch));
   ipcMain.handle('app:hotkeys', () => hotkeys);
+
+  // ---- People: faces & voices (biometrics stay on this PC, encrypted) ----
+  ipcMain.handle('people:list', () => listPeople());
+  ipcMain.handle('people:faces', () => faceDb());
+  ipcMain.handle('people:addFaces', (_e, name: string, descriptors: number[][]) => addFaces(name, descriptors));
+  ipcMain.handle('people:forget', (_e, name: string) => forgetPerson(name));
+  const pcm = (buf: ArrayBuffer | Uint8Array) => new Int16Array(buf instanceof Uint8Array ? buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) : buf);
+  const voiceProgress = (pct: number) => win?.webContents.send('event', { type: 'voice-model', pct: Math.round(pct) });
+  ipcMain.handle('voice:enroll', async (_e, name: string, audio: ArrayBuffer) => {
+    await loadVoiceModel(voiceProgress);
+    return addVoice(name, await embedVoice(pcm(audio)));
+  });
+  ipcMain.handle('voice:identify', async (_e, audio: ArrayBuffer) => {
+    await loadVoiceModel(voiceProgress);
+    return matchVoice(await embedVoice(pcm(audio)));
+  });
   ipcMain.handle('tools:manifest', () => manifest());
   ipcMain.handle('tools:exec', (_e, name: string, args: unknown) => execute(name, args, ctx));
   ipcMain.handle('stats:get', () => sampleStats());
@@ -211,6 +306,21 @@ function registerIpc() {
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media'));
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
+
+  const faceModels = path.join(app.getAppPath(), 'node_modules', '@vladmandic', 'face-api', 'model');
+  protocol.handle('models', async (req) => {
+    const name = path.basename(decodeURIComponent(new URL(req.url).pathname)); // no traversal
+    try {
+      const body = await fs.promises.readFile(path.join(faceModels, name));
+      const type = name.endsWith('.json') ? 'application/json' : 'application/octet-stream';
+      return new Response(body, { headers: { 'content-type': type, 'access-control-allow-origin': '*' } });
+    } catch {
+      return new Response('not found', { status: 404 });
+    }
+  });
+
+  // Big ML downloads go next to the app (drive with room), not the roaming profile.
+  setVoiceCacheDir(path.join(app.getAppPath(), '.cache', 'models'));
 
   protocol.handle('visual', (req) => {
     const id = decodeURIComponent(new URL(req.url).pathname.replace(/^\//, ''));
@@ -236,10 +346,15 @@ app.whenReady().then(() => {
   startHitPolling();
   createTray();
   warmAppIndex();
+  setTimeout(() => uia.warm(), 1500);
+  installCaptureGuard();
 
   if (process.env.JARVIS_SELFTEST && win) import('./selftest').then((m) => m.selfTest(win!, ctx));
 });
 
-app.on('second-instance', () => win?.showInactive());
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('second-instance', () => showOverlay());
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  uia.stop();
+});
 app.on('window-all-closed', () => app.quit());

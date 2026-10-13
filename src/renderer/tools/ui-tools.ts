@@ -8,6 +8,10 @@ export interface HudControls {
   setLog(on: boolean): void;
   setTheme(color: string): void;
   setVision(on: boolean): void;
+  /** Hide the whole HUD (bring back with the hotkey or tray icon). */
+  hide(): void;
+  /** Exit JARVIS after the current spoken reply finishes. */
+  shutdown(): void;
 }
 
 export interface UiTool extends ToolManifest {
@@ -209,10 +213,12 @@ export function uiTools(c: HudControls): UiTool[] {
     t({
       name: 'hud_control',
       description:
-        'Control the HUD itself: minimize to just the core, expand, show/hide the activity log, change the theme color, or turn continuous screen vision on/off.',
+        'Control JARVIS itself. minimize = shrink to just the core orb; expand = restore the full HUD; hide = hide JARVIS completely (comes back with the hotkey/tray); ' +
+        'shutdown = close/exit/quit JARVIS entirely (use when the user says "close yourself", "exit", "shut down", "go to sleep"); ' +
+        'also show/hide the activity log, change the theme color, or turn screen vision on/off.',
       parameters: obj(
         {
-          action: { type: 'string', enum: ['minimize', 'expand', 'show_log', 'hide_log', 'theme', 'vision_on', 'vision_off'] },
+          action: { type: 'string', enum: ['minimize', 'expand', 'hide', 'shutdown', 'show_log', 'hide_log', 'theme', 'vision_on', 'vision_off'] },
           color: ACCENT,
         },
         ['action'],
@@ -221,6 +227,8 @@ export function uiTools(c: HudControls): UiTool[] {
         switch (action) {
           case 'minimize': c.setMini(true); break;
           case 'expand': c.setMini(false); break;
+          case 'hide': setTimeout(() => c.hide(), 2500); break; // let the spoken reply start first
+          case 'shutdown': c.shutdown(); break;
           case 'show_log': c.setLog(true); break;
           case 'hide_log': c.setLog(false); break;
           case 'theme': c.setTheme(color ?? 'gold'); break;

@@ -60,9 +60,14 @@ export interface AppConfig {
 export type FxEvent =
   | { type: 'click'; x: number; y: number; button: string }
   | { type: 'move'; x: number; y: number }
-  | { type: 'type'; text: string };
+  | { type: 'type'; text: string }
+  | { type: 'scan'; boxes: { x: number; y: number; width: number; height: number }[] }
+  | { type: 'target'; box: { x: number; y: number; width: number; height: number }; label: string };
 
-export type AppEvent = { type: 'timer'; id: string; label: string };
+export type AppEvent = { type: 'timer'; id: string; label: string } | { type: 'voice-model'; pct: number };
+
+export interface PersonSummary { name: string; faceSamples: number; voiceSamples: number; since: string }
+export interface VoiceMatch { name: string | null; score: number; candidates: { name: string; score: number }[] }
 
 export type HotkeyAction = 'toggle-mic' | 'toggle-hud' | 'toggle-vision';
 
@@ -85,6 +90,14 @@ export interface HudBridge {
   /** Make the overlay the real foreground window so it receives the keyboard. */
   focus(): void;
   readClipboard(): Promise<string>;
+  people: {
+    list(): Promise<PersonSummary[]>;
+    faces(): Promise<{ name: string; descriptors: number[][] }[]>;
+    addFaces(name: string, descriptors: number[][]): Promise<{ name: string; faceSamples: number }>;
+    forget(name: string): Promise<boolean>;
+    enrollVoice(name: string, pcm: ArrayBuffer): Promise<{ name: string; voiceSamples: number }>;
+    identifyVoice(pcm: ArrayBuffer): Promise<VoiceMatch>;
+  };
   hide(): void;
   quit(): void;
   onHotkey(cb: (a: HotkeyAction) => void): void;

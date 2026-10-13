@@ -1,16 +1,10 @@
-import { desktopCapturer, screen } from 'electron';
+import { captureScreen } from '../vision';
 import { obj, type ToolDef } from './registry';
 
-/** Grab the primary display as JPEG (the HUD is excluded via content protection). */
+/** Grab the primary display as JPEG for the model (HUD excluded — see native/capture.ts). */
 export async function captureFrame(maxWidth = 1280, quality = 70) {
-  const d = screen.getPrimaryDisplay();
-  const ratio = d.size.height / d.size.width;
-  const width = Math.min(maxWidth, Math.round(d.size.width * d.scaleFactor));
-  const height = Math.round(width * ratio);
-  const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width, height } });
-  const src = sources.find((s) => s.display_id === String(d.id)) ?? sources[0];
-  if (!src) throw new Error('No screen source available');
-  return { data: src.thumbnail.toJPEG(quality).toString('base64'), mimeType: 'image/jpeg', width, height };
+  const f = await captureScreen(maxWidth);
+  return { data: f.image.toJPEG(quality).toString('base64'), mimeType: 'image/jpeg', width: f.width, height: f.height };
 }
 
 export const screenTools: ToolDef[] = [

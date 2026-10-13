@@ -1,7 +1,8 @@
 import { clipboard } from 'electron';
 import { toPhysical } from '../coords';
 import { chord, click, glide, keyDown, keyUp, mouseDown, mouseUp, sleep, vk, wheel, type Button } from '../native/win32';
-import { obj, type ToolDef } from './registry';
+import { obj, type ToolContext, type ToolDef } from './registry';
+import { ensureAppForeground } from './windows';
 
 const X = { type: 'number', minimum: 0, maximum: 1000, description: 'X on the 0-1000 normalized screen grid' } as const;
 const Y = { type: 'number', minimum: 0, maximum: 1000, description: 'Y on the 0-1000 normalized screen grid' } as const;
@@ -11,13 +12,16 @@ async function moveTo(x: number, y: number) {
   await glide(p.x, p.y);
 }
 
+/** Every agent mouse action runs with the HUD click-through (panels can't swallow clicks). */
+const agentMouse = <T>(ctx: ToolContext, fn: () => Promise<T>) => ctx.passthrough(fn);
+
 export const inputTools: ToolDef[] = [
   {
     name: 'mouse_move',
     description: 'Move the mouse cursor to a point on screen.',
     parameters: obj({ x: X, y: Y }, ['x', 'y']),
     async run({ x, y }, ctx) {
-      await moveTo(x, y);
+      await agentMouse(ctx, () => moveTo(x, y));
       ctx.emit('fx', { type: 'move', x, y });
       return { moved: { x, y } };
     },
@@ -36,9 +40,11 @@ export const inputTools: ToolDef[] = [
       ['x', 'y'],
     ),
     async run({ x, y, button, clicks }, ctx) {
-      await moveTo(x, y);
-      ctx.emit('fx', { type: 'click', x, y, button });
-      await click(button as Button, clicks);
+      await agentMouse(ctx, async () => {
+        await moveTo(x, y);
+        ctx.emit('fx', { type: 'click', x, y, button });
+        await click(button as Button, clicks);
+      });
       return { clicked: { x, y, button, clicks } };
     },
   },
@@ -47,13 +53,15 @@ export const inputTools: ToolDef[] = [
     description: 'Press and drag from one screen point to another (move files, select text, resize, sliders).',
     parameters: obj({ from_x: X, from_y: Y, to_x: X, to_y: Y }, ['from_x', 'from_y', 'to_x', 'to_y']),
     async run({ from_x, from_y, to_x, to_y }, ctx) {
-      await moveTo(from_x, from_y);
-      mouseDown('left');
-      await sleep(60);
-      const p = toPhysical(to_x, to_y);
-      await glide(p.x, p.y, 300);
-      await sleep(60);
-      mouseUp('left');
+      await agentMouse(ctx, async () => {
+        await moveTo(from_x, from_y);
+        mouseDown('left');
+        await sleep(60);
+        const p = toPhysical(to_x, to_y);
+        await glide(p.x, p.y, 300);
+        await sleep(60);
+        mouseUp('left');
+      });
       ctx.emit('fx', { type: 'click', x: to_x, y: to_y, button: 'left' });
       return 'dragged';
     },
@@ -67,10 +75,12 @@ export const inputTools: ToolDef[] = [
       x: X,
       y: Y,
     }),
-    async run({ amount, direction, x, y }) {
-      if (x !== undefined && y !== undefined) await moveTo(x, y);
-      // Windows wheel: positive = up; we expose positive = down for natural language.
-      wheel(direction === 'horizontal' ? amount : -amount, direction === 'horizontal');
+    async run({ amount, direction, x, y }, ctx) {
+      await agentMouse(ctx, async () => {
+        if (x !== undefined && y !== undefined) await moveTo(x, y);
+        // Windows wheel: positive = up; we expose positive = down for natural language.
+        wheel(direction === 'horizontal' ? amount : -amount, direction === 'horizontal');
+      });
       return 'scrolled';
     },
   },
@@ -84,6 +94,7 @@ export const inputTools: ToolDef[] = [
     ),
     async run({ text, press_enter }, ctx) {
       // Clipboard paste is instant and Unicode-safe; the user's clipboard is restored afterwards.
+      await ensureAppForeground();
       const saved = await clipboard.readText().catch(() => '');
       await clipboard.writeText(text);
       await chord('ctrl+v');
@@ -107,6 +118,7 @@ export const inputTools: ToolDef[] = [
       const combos: string[] = sequence?.length ? sequence : keys ? [keys] : [];
       if (!combos.length) throw new Error('Provide keys or sequence');
       combos.forEach((c) => c.split('+').forEach((k) => vk(k))); // validate before pressing anything
+      await ensureAppForeground();
       for (let r = 0; r < repeat; r++) for (const c of combos) {
         await chord(c);
         await sleep(30);

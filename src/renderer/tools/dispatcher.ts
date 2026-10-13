@@ -92,7 +92,12 @@ export class Dispatcher {
     const v = validateArgs(spec.parameters, args);
     if (!v.ok) return { ok: false, error: `Invalid arguments: ${v.errors.join('; ')}`, ms: 0 };
     try {
-      const result = await this.ui.get(name)!.run(v.value);
+      const limit = spec.timeoutMs ?? 60000;
+      let timer = 0;
+      const result = await Promise.race([
+        Promise.resolve(this.ui.get(name)!.run(v.value)),
+        new Promise((_, rej) => (timer = window.setTimeout(() => rej(new Error(`Timed out after ${limit}ms`)), limit))),
+      ]).finally(() => clearTimeout(timer));
       return { ok: true, result: result ?? 'done', ms: Math.round(performance.now() - t0) };
     } catch (e: any) {
       return { ok: false, error: e?.message ?? String(e), ms: Math.round(performance.now() - t0) };
